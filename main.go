@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/anthropics/anthropic-sdk-go" // need 1.4 because 1.5 changes defn of anthropic.NewToolResultBlock
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -32,7 +33,7 @@ func main() {
 		return scanner.Text(), true
 	}
 
-	tools := []ToolDefinition{ReadFileDefinition}
+	tools := []ToolDefinition{ReadFileDefinition, ListFileDefinition}
 	agent := NewAgent(&client, getUserMessage, tools)
 	err := agent.Run(context.TODO())
 	if err != nil {
@@ -153,6 +154,21 @@ type ToolDefinition struct {
 	Function    func(input json.RawMessage) (string, error)
 }
 
+func GenerateSchema[T any]() anthropic.ToolInputSchemaParam {
+	reflector := jsonschema.Reflector{
+		AllowAdditionalProperties: false,
+		DoNotReference:            true,
+	}
+	var v T
+
+	schema := reflector.Reflect(v)
+
+	return anthropic.ToolInputSchemaParam{
+		Properties: schema.Properties,
+	}
+}
+
+// read_file
 var ReadFileDefinition = ToolDefinition{
 	Name:        "read_file",
 	Description: "Read the contents of a given relative file path. Use this when you want to see what's inside a file. Do not use this with directory names.",
@@ -181,16 +197,61 @@ func ReadFile(input json.RawMessage) (string, error) {
 	return string(content), nil
 }
 
-func GenerateSchema[T any]() anthropic.ToolInputSchemaParam {
-	reflector := jsonschema.Reflector{
-		AllowAdditionalProperties: false,
-		DoNotReference:            true,
-	}
-	var v T
+// list_files
+var ListFileDefinition = ToolDefinition{
+	Name:        "list_files",
+	Description: "List files and directories at a given path. If no path is provided, list files in the current directory.",
+	InputSchema: ListFilesInputSchema,
+	Function:    ListFiles,
+}
 
-	schema := reflector.Reflect(v)
+type ListFilesInput struct {
+	Path string `json:"path,omitempty" jsonschema_description:"Optional relative path to list files from. Defaults to current directory if not provided."`
+}
 
-	return anthropic.ToolInputSchemaParam{
-		Properties: schema.Properties,
+var ListFilesInputSchema = GenerateSchema[ListFilesInput]()
+
+func ListFiles(input json.RawMessage) (string, error) {
+	listFilesInput := ListFilesInput{}
+	err := json.Unmarshal(input, &listFilesInput)
+	if err != nil {
+		panic(err)
 	}
+
+	dir := "."
+	if listFilesInput.Path != "" {
+		dir = listFilesInput.Path
+	}
+
+	var files []string
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+
+		if relPath != "." {
+			if info.IsDir() {
+				files = append(files, relPath+"/")
+			} else {
+				files = append(files, relPath)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	result, err := json.Marshal(files)
+	if err != nil {
+		return "", err
+	}
+
+	return string(result), nil
 }
