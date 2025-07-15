@@ -33,8 +33,11 @@ func main() {
 		return scanner.Text(), true
 	}
 
+	// Enable debug printing of tool outputs
+	debugToolOutputs := false
+
 	tools := []ToolDefinition{ReadFileDefinition, ListFileDefinition}
-	agent := NewAgent(&client, getUserMessage, tools)
+	agent := NewAgent(&client, getUserMessage, tools, debugToolOutputs)
 	err := agent.Run(context.TODO())
 	if err != nil {
 		fmt.Printf("Error: %s\n", err.Error())
@@ -45,18 +48,21 @@ func NewAgent(
 	client *anthropic.Client,
 	getUserMessage func() (string, bool),
 	tools []ToolDefinition,
+	debugToolOutputs bool,
 ) *Agent {
 	return &Agent{
-		client:         client,
-		getUserMessage: getUserMessage,
-		tools:          tools,
+		client:           client,
+		getUserMessage:   getUserMessage,
+		tools:            tools,
+		debugToolOutputs: debugToolOutputs,
 	}
 }
 
 type Agent struct {
-	client         *anthropic.Client
-	getUserMessage func() (string, bool)
-	tools          []ToolDefinition
+	client           *anthropic.Client
+	getUserMessage   func() (string, bool)
+	tools            []ToolDefinition
+	debugToolOutputs bool
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -144,6 +150,11 @@ func (a *Agent) executeTool(id, name string, input json.RawMessage) anthropic.Co
 	if err != nil {
 		return anthropic.NewToolResultBlock(id, err.Error(), true)
 	}
+
+	if a.debugToolOutputs {
+		fmt.Printf("\u001b[96mtool output\u001b[0m: %s\n", response)
+	}
+
 	return anthropic.NewToolResultBlock(id, response, false)
 }
 
